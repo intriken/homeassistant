@@ -106,13 +106,17 @@ action:
                         {% endif %}
                       {% endfor %}
                       {{ ns.item }}
-                - service: todo.update_item
-                  target:
-                    entity_id: "{{ list_2 }}"
-                  data:
-                    rename: "{{ added_item_2.summary }}"
-                    status: "{{ item_1.status }}"
-                    uid: "{{ item_1.uid }}"
+                - if:
+                    - condition: template
+                      value_template: "{{ added_item_2.summary != '' }}"
+                  then: 
+                    - service: todo.update_item
+                      target:
+                        entity_id: "{{ list_2 }}"
+                      data:
+                        rename: "{{ added_item_2.summary }}"
+                        status: "{{ item_1.status }}"
+                        uid: "{{ item_1.uid }}"
 
             # Item exists in list_2 but needs update
             - conditions: >
@@ -169,13 +173,17 @@ action:
                         {% endif %}
                       {% endfor %}
                       {{ ns.item }}
-                - service: todo.update_item
-                  target:
-                    entity_id: "{{ list_1 }}"
-                  data:
-                    rename: "{{ added_item_1.summary }}"
-                    status: "{{ item_2.status }}"
-                    uid: "{{ item_2.uid }}"
+                - if:
+                    - condition: template
+                      value_template: "{{ added_item_1.summary != '' }}"
+                  then: 
+                    - service: todo.update_item
+                      target:
+                        entity_id: "{{ list_1 }}"
+                      data:
+                        rename: "{{ added_item_1.summary }}"
+                        status: "{{ item_2.status }}"
+                        uid: "{{ item_2.uid }}"
             - conditions: >
                 {{ matched_item_1 != none and
                    (matched_item_1.summary != item_2.summary or
