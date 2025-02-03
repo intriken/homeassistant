@@ -108,7 +108,7 @@ action:
                       {{ ns.item }}
                 - if:
                     - condition: template
-                      value_template: "{{ matched_item_2.summary | length > 0 }}"
+                      value_template: "{{ matched_item_2.summary is defined and matched_item_2.summary | length > 0 }}"
                   then:
                     - service: todo.update_item
                       target:
@@ -118,6 +118,11 @@ action:
                         rename: "{{ item_1.summary }}"
                         status: "{{ item_1.status }}"
                         uid: "{{ item_1.uid }}"
+                  else:
+                    - service: system_log.write
+                      data:
+                        level: warning
+                        message: "Skipped updating item: matched_item_2.summary is empty or undefined."
             # Item exists in list_2 but needs update
             - conditions: >
                 {{ matched_item_2 != none and
