@@ -108,7 +108,7 @@ action:
                       {{ ns.item }}
                 - if:
                     - condition: template
-                      value_template: "{{ item_1.summary | length > 0 }}"
+                      value_template: "{{ matched_item_2.summary | length > 0 }}"
                   then:
                     - service: todo.update_item
                       target:
