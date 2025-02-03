@@ -90,8 +90,29 @@ action:
                     entity_id: "{{ list_2 }}"
                   data:
                     item: "{{ item_1.summary }}"
-                    uid: "{{ item_1.uid }}"
+                - service: todo.get_items
+                  target:
+                    entity_id: "{{ list_2 }}"
+                  data: {}
+                  response_variable: list_2_items_add
+                - variables:
+                    list_2_items_active_add: "{{ list_2_items_add[list_2]['items'] | selectattr('status', 'eq', 'needs_action') | list }}"
+                    list_2_items_completed_add: "{{ list_2_items_add[list_2]['items'] | selectattr('status', 'eq', 'completed') | list }}"
+                    added_item_2: >
+                      {% set ns = namespace(item=none) %}
+                      {% for item_2 in list_2_items_active_add + list_2_items_completed_add %}
+                        {% if item_2.summary == item_1.summary %}
+                          {% set ns.item = item_2 %}
+                        {% endif %}
+                      {% endfor %}
+                      {{ ns.item }}
+                - service: todo.update_item
+                  target:
+                    entity_id: "{{ list_2 }}"
+                  data:
+                    rename: "{{ added_item_2.summary }}"
                     status: "{{ item_1.status }}"
+                    uid: "{{ item_1.uid }}"
 
             # Item exists in list_2 but needs update
             - conditions: >
@@ -132,9 +153,29 @@ action:
                     entity_id: "{{ list_1 }}"
                   data:
                     item: "{{ item_2.summary }}"
-                    uid: "{{ item_2.uid }}"
+                - service: todo.get_items
+                  target:
+                    entity_id: "{{ list_1 }}"
+                  data: {}
+                  response_variable: list_1_items_add
+                - variables:
+                    list_1_items_active_add: "{{ list_1_items_add[list_1]['items'] | selectattr('status', 'eq', 'needs_action') | list }}"
+                    list_1_items_completed_add: "{{ list_1_items_add[list_1]['items'] | selectattr('status', 'eq', 'completed') | list }}"
+                    added_item_1: >
+                      {% set ns = namespace(item=none) %}
+                      {% for item_1 in list_1_items_active_add + list_1_items_completed_add %}
+                        {% if item_1.summary == item_2.summary %}
+                          {% set ns.item = item_1 %}
+                        {% endif %}
+                      {% endfor %}
+                      {{ ns.item }}
+                - service: todo.update_item
+                  target:
+                    entity_id: "{{ list_1 }}"
+                  data:
+                    rename: "{{ added_item_1.summary }}"
                     status: "{{ item_2.status }}"
-
+                    uid: "{{ item_2.uid }}"
             - conditions: >
                 {{ matched_item_1 != none and
                    (matched_item_1.summary != item_2.summary or
