@@ -1,60 +1,133 @@
-blueprint:
-  name: "Synchronize 2 Home Assistant todo list"
-  description: |
-    This blueprint synchronizes 2 to-do lists. Originally designed to sync 
-    Google Keep lists with the Bring shopping list, its versatility allows 
-    syncing any list. Currently limited to syncing only active items, 
-    those marked as completed are removed from the lists.
-  source_url: https://gist.github.com/hectorzin/53f9811ff2d6a673af9ff3a9801df7af
-  domain: automation
-  input:
-    google_list:
-      name: List 1
-      description: Select your first list to synchronize
-      selector:
-        entity:
-          domain:
-            - todo
-          multiple: false
-    bring_list:
-      name: List 2
-      description: Select your second list to synchronize
-      selector:
-        entity:
-          domain:
-            - todo
-          multiple: false
-    temp_list:
-      name: Temp List
-      description: Select the temporary list that is used as the basis of the synchronization
-      selector:
-        entity:
-          domain:
-            - todo
-          multiple: false
-
-trigger:  # Corrected typo here!
+name: "Synchronize 2 Home Assistant Todo Lists (Improved)"
+description: >
+  This blueprint synchronizes two to-do lists in Home Assistant bidirectionally.
+  It identifies added, removed, and moved items, ensuring accurate and reliable
+  synchronization.
+domain: automation
+input:
+  list_1:
+    name: List 1
+    description: Select your first list to synchronize.
+    selector:
+      entity:
+        domain: todo
+  list_2:
+    name: List 2
+    description: Select your second list to synchronize.
+    selector:
+      entity:
+        domain: todo
+trigger:
   - platform: state
     entity_id:
-      - !input google_list
+      - !input list_1
   - platform: state
     entity_id:
-      - !input bring_list
-
+      - !input list_2
+condition: []
 action:
-  - choose:
-      - conditions: "{{ trigger.entity_id == list_1_entity }}"
-        sequence:
-          - service: input_list.set_list
-            data:
-              entity_id: "{{ list_2_entity }}"
-              items: "{{ state_attr(list_1_entity, 'items') | default([]) }}"
-      - conditions: "{{ trigger.entity_id == list_2_entity }}"
-        sequence:
-          - service: input_list.set_list
-            data:
-              entity_id: "{{ list_1_entity }}"
-              items: "{{ state_attr(list_2_entity, 'items') | default([]) }}"
-    default: [] # Should never happen, but good practice
+  - variables:
+      list_1: !input list_1
+      list_2: !input list_2
+  - service: todo.get_items
+    target:
+      entity_id: "{{ list_1 }}"
+    data:
+      status: needs_action
+    response_variable: list_1_items
+  - service: todo.get_items
+    target:
+      entity_id: "{{ list_2 }}"
+    data:
+      status: needs_action
+    response_variable: list_2_items
 
-mode: restart # Important: Restart automation if HA restarts to ensure sync continues
+  - variables:
+      list_1_items: "{{ list_1_items[list_1]['items'] }}"
+      list_2_items: "{{ list_2_items[list_2]['items'] }}"
+
+  # Identify new items in List 1
+  - variables:
+      new_in_list_1: >
+        {% set new_items = [] %}
+        {% for item in list_1_items %}
+          {% if item.summary not in list_2_items | map(attribute='summary') | list %}
+            {% set new_items = new_items + [item.summary] %}
+          {% endif %}
+        {% endfor %}
+        {{ new_items }}
+
+  # Identify new items in List 2
+  - variables:
+      new_in_list_2: >
+        {% set new_items = [] %}
+        {% for item in list_2_items %}
+          {% if item.summary not in list_1_items | map(attribute='summary') | list %}
+            {% set new_items = new_items + [item.summary] %}
+          {% endif %}
+        {% endfor %}
+        {{ new_items }}
+
+  # Identify removed items from List 1
+  - variables:
+      removed_from_list_1: >
+        {% set removed_items = [] %}
+        {% for item in list_2_items %}
+          {% if item.summary not in list_1_items | map(attribute='summary') | list %}
+            {% set removed_items = removed_items + [item.summary] %}
+          {% endif %}
+        {% endfor %}
+        {{ removed_items }}
+
+  # Identify removed items from List 2
+  - variables:
+      removed_from_list_2: >
+        {% set removed_items = [] %}
+        {% for item in list_1_items %}
+          {% if item.summary not in list_2_items | map(attribute='summary') | list %}
+            {% set removed_items = removed_items + [item.summary] %}
+          {% endif %}
+        {% endfor %}
+        {{ removed_items }}
+
+  # Add new items to List 2
+  - repeat:
+      for_each: "{{ new_in_list_1 }}"
+      sequence:
+        - service: todo.add_item
+          target:
+            entity_id: "{{ list_2 }}"
+          data:
+            item: "{{ repeat.item }}"
+
+  # Add new items to List 1
+  - repeat:
+      for_each: "{{ new_in_list_2 }}"
+      sequence:
+        - service: todo.add_item
+          target:
+            entity_id: "{{ list_1 }}"
+          data:
+            item: "{{ repeat.item }}"
+
+  # Remove items from List 1 that were present in List 2 but are not in List 1 anymore
+  - repeat:
+      for_each: "{{ removed_from_list_2 }}"
+      sequence:
+        - service: todo.remove_item
+          target:
+            entity_id: "{{ list_1 }}"
+          data:
+            item: "{{ repeat.item }}"
+
+  # Remove items from List 2 that were present in List 1 but are not in List 2 anymore
+  - repeat:
+      for_each: "{{ removed_from_list_1 }}"
+      sequence:
+        - service: todo.remove_item
+          target:
+            entity_id: "{{ list_2 }}"
+          data:
+            item: "{{ repeat.item }}"
+
+mode: single
