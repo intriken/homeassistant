@@ -1,70 +1,48 @@
 blueprint:
-  name: "Bidirectional Sync for Two To-Do Lists"
-  description: "Synchronizes two Home Assistant to-do lists, ensuring both contain the same items."
+  name: Bidirectional List Sync
+  description: Synchronizes two lists bi-directionally.  Changes in either list will be reflected in the other.
   domain: automation
+
   input:
-    list_1:
-      name: List 1
-      description: "Select your first list to synchronize."
+    list_1_entity:
+      name: List 1 Entity
+      description: The entity ID of the first list.
       selector:
         entity:
-          domain: todo
-          multiple: false
-    list_2:
-      name: List 2
-      description: "Select your second list to synchronize."
+          filter:
+            domain: input_list
+    list_2_entity:
+      name: List 2 Entity
+      description: The entity ID of the second list.
       selector:
         entity:
-          domain: todo
-          multiple: false
+          filter:
+            domain: input_list
+
+  variables:
+    list_1_entity: !input list_1_entity
+    list_2_entity: !input list_2_entity
 
 trigger:
   - platform: state
-    entity_id:
-      - !input 'list_1'
+    entity_id: !input list_1_entity
   - platform: state
-    entity_id:
-      - !input 'list_2'
+    entity_id: !input list_2_entity
 
 action:
-  - variables:
-      list_1: !input 'list_1'
-      list_2: !input 'list_2'
-  
-  - service: todo.get_items
-    target:
-      entity_id: "{{ list_1 }}"
-    data:
-      status: needs_action
-    response_variable: list_1_items
+  - choose:
+      - conditions: "{{ trigger.entity_id == list_1_entity }}"
+        sequence:
+          - service: input_list.set_list
+            data:
+              entity_id: "{{ list_2_entity }}"
+              items: "{{ state_attr(list_1_entity, 'items') | default([]) }}"
+      - conditions: "{{ trigger.entity_id == list_2_entity }}"
+        sequence:
+          - service: input_list.set_list
+            data:
+              entity_id: "{{ list_1_entity }}"
+              items: "{{ state_attr(list_2_entity, 'items') | default([]) }}"
+    default: [] # Should never happen, but good practice
 
-  - service: todo.get_items
-    target:
-      entity_id: "{{ list_2 }}"
-    data:
-      status: needs_action
-    response_variable: list_2_items
-
-  - variables:
-      items_1: "{{ list_1_items[list_1]['items'] | map(attribute='summary') | list }}"
-      items_2: "{{ list_2_items[list_2]['items'] | map(attribute='summary') | list }}"
-      items_to_add_1: "{{ items_2 | difference(items_1) }}"
-      items_to_add_2: "{{ items_1 | difference(items_2) }}"
-
-  - repeat:
-      for_each: "{{ items_to_add_1 }}"
-      sequence:
-        - service: todo.add_item
-          target:
-            entity_id: "{{ list_1 }}"
-          data:
-            item: "{{ repeat.item }}"
-
-  - repeat:
-      for_each: "{{ items_to_add_2 }}"
-      sequence:
-        - service: todo.add_item
-          target:
-            entity_id: "{{ list_2 }}"
-          data:
-            item: "{{ repeat.item }}"
+mode: restart # Important: Restart automation if HA restarts to ensure sync continues
