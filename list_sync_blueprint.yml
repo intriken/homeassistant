@@ -1,332 +1,70 @@
 blueprint:
-  name: "Synchronize 2 Home Assistant To-Do Lists (Bi-Directional)"
-  description: >
-    This blueprint for Home Assistant provides bi-directional synchronization between two to-do lists.
-    It handles adding, updating, and completing items in either list, ensuring changes are reflected in the other.
-    You can configure whether completed items should be removed or simply marked as complete.
-  source_url: https://gist.github.com/hectorzin/53f9811ff2d6a673af9ff3a9801df7af
+  name: "Bidirectional Sync for Two To-Do Lists"
+  description: "Synchronizes two Home Assistant to-do lists, ensuring both contain the same items."
   domain: automation
   input:
     list_1:
       name: List 1
-      description: Select your first list to synchronize.
+      description: "Select your first list to synchronize."
       selector:
         entity:
           domain: todo
           multiple: false
     list_2:
       name: List 2
-      description: Select your second list to synchronize.
+      description: "Select your second list to synchronize."
       selector:
         entity:
           domain: todo
           multiple: false
-    remove_completed:
-      name: Remove Completed Items
-      description: >
-        If enabled, completed items will be removed from both lists.
-        If disabled, completed items will be marked as completed in both lists.
-      default: true
-      selector:
-        boolean:
 
-trigger:
-  - platform: event
-    event_type: todo_list_updated
-    event_data:
-      entity_id: !input list_1
-  - platform: event
-    event_type: todo_list_updated
-    event_data:
-      entity_id: !input list_2
-
-condition: []
+tigger:
+  - platform: state
+    entity_id:
+      - !input 'list_1'
+  - platform: state
+    entity_id:
+      - !input 'list_2'
 
 action:
   - variables:
-      list_1: !input list_1
-      list_2: !input list_2
-      remove_completed: !input remove_completed
-
+      list_1: !input 'list_1'
+      list_2: !input 'list_2'
+  
   - service: todo.get_items
     target:
       entity_id: "{{ list_1 }}"
-    data: {}
+    data:
+      status: needs_action
     response_variable: list_1_items
 
   - service: todo.get_items
     target:
       entity_id: "{{ list_2 }}"
-    data: {}
+    data:
+      status: needs_action
     response_variable: list_2_items
 
   - variables:
-      list_1_items_active: "{{ list_1_items[list_1]['items'] | selectattr('status', 'eq', 'needs_action') | list }}"
-      list_1_items_completed: "{{ list_1_items[list_1]['items'] | selectattr('status', 'eq', 'completed') | list }}"
-      list_2_items_active: "{{ list_2_items[list_2]['items'] | selectattr('status', 'eq', 'needs_action') | list }}"
-      list_2_items_completed: "{{ list_2_items[list_2]['items'] | selectattr('status', 'eq', 'completed') | list }}"
+      items_1: "{{ list_1_items[list_1]['items'] | map(attribute='summary') | list }}"
+      items_2: "{{ list_2_items[list_2]['items'] | map(attribute='summary') | list }}"
+      items_to_add_1: "{{ items_2 | difference(items_1) }}"
+      items_to_add_2: "{{ items_1 | difference(items_2) }}"
 
-  # --- Handle New and Updated Items ---
   - repeat:
-      for_each: "{{ list_1_items_active + list_1_items_completed }}"
+      for_each: "{{ items_to_add_1 }}"
       sequence:
-        - variables:
-            item_1: "{{ repeat.item }}"
-            matched_item_2: >
-              {% set ns = namespace(item=none) %}
-              {% for item_2 in list_2_items_active + list_2_items_completed %}
-                {% if item_2.uid == item_1.uid %}
-                  {% set ns.item = item_2 %}
-                {% endif %}
-              {% endfor %}
-              {{ ns.item }}
+        - service: todo.add_item
+          target:
+            entity_id: "{{ list_1 }}"
+          data:
+            item: "{{ repeat.item }}"
 
-        - choose:
-            # Item doesn't exist in list_2: Add it
-            - conditions: "{{ matched_item_2 == none }}"
-              sequence:
-                - service: todo.add_item
-                  target:
-                    entity_id: "{{ list_2 }}"
-                  data:
-                    item: "{{ item_1.summary }}"
-                - service: todo.get_items
-                  target:
-                    entity_id: "{{ list_2 }}"
-                  data: {}
-                  response_variable: list_2_items_add
-                - variables:
-                    list_2_items_active_add: "{{ list_2_items_add[list_2]['items'] | selectattr('status', 'eq', 'needs_action') | list }}"
-                    list_2_items_completed_add: "{{ list_2_items_add[list_2]['items'] | selectattr('status', 'eq', 'completed') | list }}"
-                    added_item_2: >
-                      {% set ns = namespace(item=none) %}
-                      {% for item_2 in list_2_items_active_add + list_2_items_completed_add %}
-                        {% if item_2.summary == item_1.summary %}
-                          {% set ns.item = item_2 %}
-                        {% endif %}
-                      {% endfor %}
-                      {{ ns.item }}
-                - if:
-                    - condition: template
-                      value_template: "{{ matched_item_2.summary is defined and matched_item_2.summary | length > 0 }}"
-                  then:
-                    - service: todo.update_item
-                      target:
-                        entity_id: "{{ list_2 }}"
-                      data:
-                        item: "{{ matched_item_2.summary }}"
-                        rename: "{{ item_1.summary }}"
-                        status: "{{ item_1.status }}"
-                        uid: "{{ item_1.uid }}"
-                  else:
-                    - service: system_log.write
-                      data:
-                        level: warning
-                        message: "Skipped updating item: matched_item_2.summary is empty or undefined."
-            # Item exists in list_2 but needs update
-            - conditions: >
-                {{ matched_item_2 != none and
-                   (matched_item_2.summary != item_1.summary or
-                    matched_item_2.status != item_1.status)
-                }}
-              sequence:
-                - service: todo.update_item
-                  target:
-                    entity_id: "{{ list_2 }}"
-                  data:
-                    item: "{{ matched_item_2.summary }}"
-                    rename: "{{ item_1.summary }}"
-                    status: "{{ item_1.status }}"
-                    uid: "{{ item_1.uid }}"
-
-  # --- Handle New and Updated Items in list_2 (mirror of above) ---
   - repeat:
-      for_each: "{{ list_2_items_active + list_2_items_completed }}"
+      for_each: "{{ items_to_add_2 }}"
       sequence:
-        - variables:
-            item_2: "{{ repeat.item }}"
-            matched_item_1: >
-              {% set ns = namespace(item=none) %}
-              {% for item_1 in list_1_items_active + list_1_items_completed %}
-                {% if item_1.uid == item_2.uid %}
-                  {% set ns.item = item_1 %}
-                {% endif %}
-              {% endfor %}
-              {{ ns.item }}
-
-        - choose:
-            - conditions: "{{ matched_item_1 == none }}"
-              sequence:
-                - service: todo.add_item
-                  target:
-                    entity_id: "{{ list_1 }}"
-                  data:
-                    item: "{{ item_2.summary }}"
-                - service: todo.get_items
-                  target:
-                    entity_id: "{{ list_1 }}"
-                  data: {}
-                  response_variable: list_1_items_add
-                - variables:
-                    list_1_items_active_add: "{{ list_1_items_add[list_1]['items'] | selectattr('status', 'eq', 'needs_action') | list }}"
-                    list_1_items_completed_add: "{{ list_1_items_add[list_1]['items'] | selectattr('status', 'eq', 'completed') | list }}"
-                    added_item_1: >
-                      {% set ns = namespace(item=none) %}
-                      {% for item_1 in list_1_items_active_add + list_1_items_completed_add %}
-                        {% if item_1.summary == item_2.summary %}
-                          {% set ns.item = item_1 %}
-                        {% endif %}
-                      {% endfor %}
-                      {{ ns.item }}
-                - service: todo.update_item
-                  target:
-                    entity_id: "{{ list_1 }}"
-                  data:
-                    item: "{{ added_item_1.summary }}"
-                    status: "{{ item_2.status }}"
-                    uid: "{{ item_2.uid }}"
-            - conditions: >
-                {{ matched_item_1 != none and
-                   (matched_item_1.summary != item_2.summary or
-                    matched_item_1.status != item_2.status)
-                }}
-              sequence:
-                - service: todo.update_item
-                  target:
-                    entity_id: "{{ list_1 }}"
-                  data:
-                    item: "{{ matched_item_1.summary }}"
-                    rename: "{{ item_2.summary }}"
-                    status: "{{ item_2.status }}"
-                    uid: "{{ item_2.uid }}"
-
-  # --- Handle Completed or Deleted Items ---
-  - choose:
-      - conditions: "{{ remove_completed }}"
-        sequence:
-          # Remove completed items from list_2 if they were completed in list_1
-          - repeat:
-              for_each: "{{ list_1_items_completed }}"
-              sequence:
-                - variables:
-                    item_1: "{{ repeat.item }}"
-                - service: todo.get_items
-                  target:
-                    entity_id: "{{ list_2 }}"
-                  data:
-                    status: completed
-                  response_variable: list_2_completed_items
-                - variables:
-                    matched_item_2: >
-                      {% set ns = namespace(item=none) %}
-                      {% for item_2 in list_2_completed_items[list_2]['items'] %}
-                        {% if item_2.uid == item_1.uid %}
-                          {% set ns.item = item_2 %}
-                        {% endif %}
-                      {% endfor %}
-                      {{ ns.item }}
-                - if:
-                    - condition: template
-                      value_template: "{{ matched_item_2 is not none }}"
-                  then:
-                    - service: todo.remove_item
-                      target:
-                        entity_id: "{{ list_2 }}"
-                      data:
-                        item: "{{ matched_item_2.summary }}"
-          # Remove completed items from list_1 if they were completed in list_2 (mirror of above)
-          - repeat:
-              for_each: "{{ list_2_items_completed }}"
-              sequence:
-                - variables:
-                    item_2: "{{ repeat.item }}"
-                - service: todo.get_items
-                  target:
-                    entity_id: "{{ list_1 }}"
-                  data:
-                    status: completed
-                  response_variable: list_1_completed_items
-                - variables:
-                    matched_item_1: >
-                      {% set ns = namespace(item=none) %}
-                      {% for item_1 in list_1_completed_items[list_1]['items'] %}
-                        {% if item_1.uid == item_2.uid %}
-                          {% set ns.item = item_1 %}
-                        {% endif %}
-                      {% endfor %}
-                      {{ ns.item }}
-                - if:
-                    - condition: template
-                      value_template: "{{ matched_item_1 is not none }}"
-                  then:
-                    - service: todo.remove_item
-                      target:
-                        entity_id: "{{ list_1 }}"
-                      data:
-                        item: "{{ matched_item_1.summary }}"
-
-      - conditions: "{{ not remove_completed }}"
-        sequence:
-          # Mark completed items in list_2 if they were completed in list_1
-          - repeat:
-              for_each: "{{ list_1_items_completed }}"
-              sequence:
-                - variables:
-                    item_1: "{{ repeat.item }}"
-                - service: todo.get_items
-                  target:
-                    entity_id: "{{ list_2 }}"
-                  data:
-                    status: needs_action
-                  response_variable: list_2_active_items
-                - variables:
-                    matched_item_2: >
-                      {% set ns = namespace(item=none) %}
-                      {% for item_2 in list_2_active_items[list_2]['items'] %}
-                        {% if item_2.uid == item_1.uid %}
-                          {% set ns.item = item_2 %}
-                        {% endif %}
-                      {% endfor %}
-                      {{ ns.item }}
-                - if:
-                    - condition: template
-                      value_template: "{{ matched_item_2 is not none }}"
-                  then:
-                    - service: todo.update_item
-                      target:
-                        entity_id: "{{ list_2 }}"
-                      data:
-                        item: "{{ matched_item_2.summary }}"
-                        status: completed
-          # Mark completed items in list_1 if they were completed in list_2 (mirror of above)
-          - repeat:
-              for_each: "{{ list_2_items_completed }}"
-              sequence:
-                - variables:
-                    item_2: "{{ repeat.item }}"
-                - service: todo.get_items
-                  target:
-                    entity_id: "{{ list_1 }}"
-                  data:
-                    status: needs_action
-                  response_variable: list_1_active_items
-                - variables:
-                    matched_item_1: >
-                      {% set ns = namespace(item=none) %}
-                      {% for item_1 in list_1_active_items[list_1]['items'] %}
-                        {% if item_1.uid == item_2.uid %}
-                          {% set ns.item = item_1 %}
-                        {% endif %}
-                      {% endfor %}
-                      {{ ns.item }}
-                - if:
-                    - condition: template
-                      value_template: "{{ matched_item_1 is not none }}"
-                  then:
-                    - service: todo.update_item
-                      target:
-                        entity_id: "{{ list_1 }}"
-                      data:
-                        item: "{{ matched_item_1.summary }}"
-                        status: completed
-mode: single
+        - service: todo.add_item
+          target:
+            entity_id: "{{ list_2 }}"
+          data:
+            item: "{{ repeat.item }}"
