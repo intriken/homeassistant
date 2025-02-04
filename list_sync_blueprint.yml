@@ -1,33 +1,45 @@
 blueprint:
-  name: Bidirectional List Sync
-  description: Synchronizes two lists bi-directionally.  Changes in either list will be reflected in the other.
+  name: "Synchronize 2 Home Assistant todo list"
+  description: |
+    This blueprint synchronizes 2 to-do lists. Originally designed to sync 
+    Google Keep lists with the Bring shopping list, its versatility allows 
+    syncing any list. Currently limited to syncing only active items, 
+    those marked as completed are removed from the lists.
+  source_url: https://gist.github.com/hectorzin/53f9811ff2d6a673af9ff3a9801df7af
   domain: automation
-
   input:
-    list_1_entity:
-      name: List 1 Entity
-      description: The entity ID of the first list.
+    google_list:
+      name: List 1
+      description: Select your first list to synchronize
       selector:
         entity:
-          filter:
-            domain: input_list
-    list_2_entity:
-      name: List 2 Entity
-      description: The entity ID of the second list.
+          domain:
+            - todo
+          multiple: false
+    bring_list:
+      name: List 2
+      description: Select your second list to synchronize
       selector:
         entity:
-          filter:
-            domain: input_list
+          domain:
+            - todo
+          multiple: false
+    temp_list:
+      name: Temp List
+      description: Select the temporary list that is used as the basis of the synchronization
+      selector:
+        entity:
+          domain:
+            - todo
+          multiple: false
 
-  variables:
-    list_1_entity: !input list_1_entity
-    list_2_entity: !input list_2_entity
-
-trigger:
+trigger:  # Corrected typo here!
   - platform: state
-    entity_id: !input list_1_entity
+    entity_id:
+      - !input google_list
   - platform: state
-    entity_id: !input list_2_entity
+    entity_id:
+      - !input bring_list
 
 action:
   - choose:
